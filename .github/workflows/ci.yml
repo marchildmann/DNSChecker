@@ -1,0 +1,45 @@
+name: CI
+
+# Builds on macOS and Windows and runs the tests: the unit tests, and a real
+# lookup of github.com that shows each system's DNS code reads every record type.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build (Apple silicon and Intel)
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+          cmake --build build -j 4
+      - name: Unit tests
+        run: ctest --test-dir build --output-on-failure
+      - name: Network test
+        run: build/test_network
+
+  windows:
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: git zip
+          pacboy: gcc:p cmake:p ninja:p libxml2:p zlib:p
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+      - name: Unit tests
+        run: ctest --test-dir build --output-on-failure
+      - name: Network test
+        run: build/test_network.exe
