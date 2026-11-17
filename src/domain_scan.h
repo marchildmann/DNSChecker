@@ -16,7 +16,7 @@ enum {
 
 /* DKIM selectors of common mail services, tried on every scan. When none
  * of them and none of the user's names has a key, but names exist below
- * _domainkey, the scan also tries Hetzner's dated ones (default2502). */
+ * _domainkey, the scan also tries dated ones such as default2502. */
 extern const char *const scan_common_dkim_selectors[];
 extern const int scan_common_dkim_selector_count;
 

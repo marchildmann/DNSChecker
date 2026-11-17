@@ -23,7 +23,7 @@ static const ui_text german = {
         .looking_up = "DNS wird abgefragt …",
         .no_lookup_title = "Noch keine Abfrage",
         .no_lookup_description = "Domain eingeben und „Abfragen“ drücken. Abgefragt werden A, AAAA, CNAME, MX, NS, "
-                                 "TXT, SOA und CAA der Domain, dazu www, gängige DKIM-Selektoren (auch Hetzners "
+                                 "TXT, SOA und CAA der Domain, dazu www, gängige DKIM-Selektoren (auch datierte wie "
                                  "default<JJMM>) und die weiteren Namen.",
         .present = "vorhanden",
         .missing = "fehlt",
@@ -151,8 +151,8 @@ static const ui_text english = {
         .looking_up = "Looking up DNS …",
         .no_lookup_title = "No lookup yet",
         .no_lookup_description = "Enter a domain and press “Look Up”. The app asks for the domain's A, AAAA, CNAME, "
-                                 "MX, NS, TXT, SOA and CAA records, plus www, common DKIM selectors (including "
-                                 "Hetzner's default<YYMM>) and the extra names.",
+                                 "MX, NS, TXT, SOA and CAA records, plus www, common DKIM selectors (including dated "
+                                 "ones like default<YYMM>) and the extra names.",
         .present = "present",
         .missing = "missing",
         .name_unknown = "name unknown",

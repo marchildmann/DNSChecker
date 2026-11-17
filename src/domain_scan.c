@@ -270,9 +270,8 @@ static void scan_names_below_domain(lookup_report *report, const char *extra_nam
 /* DKIM selectors with a date in their name                                 */
 /* ------------------------------------------------------------------------ */
 
-/* Hetzner (konsoleH, managed servers) names each key "default" plus the
- * year and month it was made, e.g. default2502. Keys older than this are
- * not looked for. */
+/* Some hosting providers name each key "default" plus the year and month it
+ * was made, e.g. default2502. Keys older than this are not looked for. */
 enum { DATED_SELECTOR_FIRST_YEAR = 2018 };
 
 /* "_domainkey.<domain>" exists (NOERROR, no data) as soon as any selector

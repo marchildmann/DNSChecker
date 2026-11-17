@@ -12,7 +12,7 @@ the DE / EN control at the top right.
   zone's own name server (libresolv, on a worker thread), so changes show at once instead of
   after the cached TTL; without a reachable server it falls back to the system resolver. Also
   asks `www`, common DKIM selectors (Google, Microsoft 365, Mailchimp, SendGrid, `default`,
-  and Hetzner's dated `default<YYMM>` when names exist below `_domainkey`) and the names typed
+  and dated ones like `default<YYMM>` when names exist below `_domainkey`) and the names typed
   under "More names". DNS cannot list a zone's names, so other subdomains have to be named.
   Shows everything in a table filtered by type, names relative to the domain (`@`, `www`), and
   summarizes mail authentication (MX, SPF, DKIM, DMARC).
