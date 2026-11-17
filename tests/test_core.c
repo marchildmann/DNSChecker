@@ -1,0 +1,199 @@
+/* Tests for the parts that need neither a window nor the network:
+ * domain names, DMARC records and DMARC aggregate reports. */
+#include "dmarc.h"
+#include "dmarc_report.h"
+#include "dns_lookup.h"
+#include "domain_scan.h"
+
+#include <stdio.h>
+#include <string.h>
+
+static int failure_count = 0;
+
+static void expect_text(const char *what, const char *actual, const char *expected) {
+    if (strcmp(actual, expected) == 0) return;
+    printf("FAIL %s\n  expected: %s\n  actual:   %s\n", what, expected, actual);
+    failure_count++;
+}
+
+static void expect_true(const char *what, bool condition) {
+    if (condition) return;
+    printf("FAIL %s\n", what);
+    failure_count++;
+}
+
+static void expect_normalized(const char *input, const char *expected) {
+    char domain[DNS_DOMAIN_CAPACITY];
+    bool is_valid = dns_normalize_domain(input, domain, sizeof domain);
+    expect_true(input, is_valid);
+    if (is_valid) expect_text(input, domain, expected);
+}
+
+static void expect_rejected(const char *input) {
+    char domain[DNS_DOMAIN_CAPACITY];
+    expect_true(input, !dns_normalize_domain(input, domain, sizeof domain));
+}
+
+static void test_domain_normalization(void) {
+    expect_normalized("example.com", "example.com");
+    expect_normalized("  Example.COM.  ", "example.com");
+    expect_normalized("https://www.example.com/path?q=1", "www.example.com");
+    expect_normalized("example.com:443", "example.com");
+    expect_normalized("_dmarc.example.com", "_dmarc.example.com");
+    expect_rejected("");
+    expect_rejected("   ");
+    expect_rejected("exa mple.com");
+    expect_rejected("example..com");
+    expect_rejected("bücher.de");   /* IDN needs punycode first */
+}
+
+static void expect_qualified(const char *entry, const char *expected) {
+    char name[DNS_DOMAIN_CAPACITY];
+    bool is_valid = dns_qualify_name(entry, "example.com", name, sizeof name);
+    expect_true(entry, is_valid);
+    if (is_valid) expect_text(entry, name, expected);
+}
+
+static void expect_relative(const char *name, const char *expected) {
+    char relative[DNS_DOMAIN_CAPACITY];
+    dns_relative_name(name, "example.com", relative, sizeof relative);
+    expect_text(name, relative, expected);
+}
+
+static void test_names_below_domain(void) {
+    char name[DNS_DOMAIN_CAPACITY];
+    expect_qualified("www", "www.example.com");
+    expect_qualified("S1._domainkey", "s1._domainkey.example.com");
+    expect_qualified("lp.example.com", "lp.example.com");
+    expect_qualified("@", "example.com");
+    expect_qualified("example.com", "example.com");
+    expect_qualified("badexample.com", "badexample.com.example.com");   /* not below the domain: relative */
+    expect_true("invalid entry", !dns_qualify_name("a b", "example.com", name, sizeof name));
+
+    expect_relative("example.com", "@");
+    expect_relative("www.example.com", "www");
+    expect_relative("google._domainkey.example.com", "google._domainkey");
+    expect_relative("github.com", "github.com");
+    expect_relative("badexample.com", "badexample.com");
+}
+
+static void test_dkim_keys(void) {
+    expect_true("key", dkim_record_has_key("v=DKIM1; k=rsa; p=MIIBIjANBgkq"));
+    expect_true("key without spaces", dkim_record_has_key("k=rsa;p=MIGfMA0GCSq"));
+    expect_true("revoked key", !dkim_record_has_key("v=DKIM1; p="));
+    expect_true("revoked key with space", !dkim_record_has_key("v=DKIM1; p= ;"));
+    expect_true("no p tag", !dkim_record_has_key("v=spf1 -all"));
+    expect_true("p inside another tag", !dkim_record_has_key("v=DKIM1; s=email:p=x"));
+}
+
+static void expect_record(const char *what, dmarc_settings settings, const char *expected) {
+    char record[DMARC_RECORD_CAPACITY];
+    expect_true(what, dmarc_build_record(&settings, record, sizeof record));
+    expect_text(what, record, expected);
+}
+
+static void test_dmarc_records(void) {
+    expect_record("defaults are omitted", (dmarc_settings){ .percentage = 100 }, "v=DMARC1; p=none");
+    expect_record("every tag",
+                  (dmarc_settings){
+                      .policy = DMARC_POLICY_REJECT,
+                      .has_subdomain_policy = true,
+                      .subdomain_policy = DMARC_POLICY_QUARANTINE,
+                      .percentage = 50,
+                      .aggregate_report_addresses = "a@example.com, mailto:b@example.com",
+                      .failure_report_addresses = "f@example.com",
+                      .failure_reporting = DMARC_FAILURE_WHEN_ANY_FAILS,
+                      .dkim_alignment = DMARC_ALIGNMENT_STRICT,
+                      .spf_alignment = DMARC_ALIGNMENT_STRICT,
+                  },
+                  "v=DMARC1; p=reject; sp=quarantine; pct=50; rua=mailto:a@example.com,mailto:b@example.com; "
+                  "ruf=mailto:f@example.com; fo=1; adkim=s; aspf=s");
+    expect_record("fo needs ruf",
+                  (dmarc_settings){ .percentage = 100, .failure_reporting = DMARC_FAILURE_WHEN_DKIM_FAILS },
+                  "v=DMARC1; p=none");
+
+    char tiny[8];
+    expect_true("too small buffer fails", !dmarc_build_record(&(dmarc_settings){ .percentage = 100 }, tiny, sizeof tiny));
+}
+
+static void expect_round_trip(const char *record) {
+    dmarc_settings settings;
+    char rebuilt[DMARC_RECORD_CAPACITY];
+    expect_true(record, dmarc_parse_record(record, &settings));
+    expect_true(record, dmarc_build_record(&settings, rebuilt, sizeof rebuilt));
+    expect_text(record, rebuilt, record);
+}
+
+static void test_dmarc_parsing(void) {
+    dmarc_settings settings;
+    expect_round_trip("v=DMARC1; p=quarantine");
+    expect_round_trip("v=DMARC1; p=reject; sp=none; pct=25; rua=mailto:a@example.com,mailto:b@example.org; "
+                      "ruf=mailto:f@example.com; fo=d; adkim=s; aspf=s");
+
+    expect_true("loose spelling", dmarc_parse_record(" v = DMARC1 ;P=Reject;rua=mailto:x@example.com ;ri=3600", &settings));
+    expect_true("loose spelling policy", settings.policy == DMARC_POLICY_REJECT);
+    expect_text("addresses shown without mailto", settings.aggregate_report_addresses, "x@example.com");
+
+    expect_true("defaults spelled out", dmarc_records_are_equivalent("v=DMARC1;p=none;sp=none;pct=50;adkim=r;aspf=r;",
+                                                                     "v=DMARC1; p=none; sp=none; pct=50"));
+    expect_true("different policy", !dmarc_records_are_equivalent("v=DMARC1; p=none", "v=DMARC1; p=reject"));
+    expect_true("not dmarc", !dmarc_parse_record("v=spf1 -all", &settings));
+    expect_true("version must come first", !dmarc_parse_record("p=reject; v=DMARC1", &settings));
+}
+
+static void test_dmarc_addresses(void) {
+    char foreign[DNS_DOMAIN_CAPACITY];
+    expect_true("empty list is fine", dmarc_check_address_list("") == NULL);
+    expect_true("two addresses", dmarc_check_address_list("a@example.com, mailto:b@example.org") == NULL);
+    expect_true("missing at sign", dmarc_check_address_list("example.com") != NULL);
+    expect_true("missing domain dot", dmarc_check_address_list("a@localhost") != NULL);
+
+    expect_true("same domain", !dmarc_find_foreign_report_domain("example.com", "a@example.com", foreign, sizeof foreign));
+    expect_true("parent domain", !dmarc_find_foreign_report_domain("mail.example.com", "a@example.com", foreign, sizeof foreign));
+    expect_true("lookalike is foreign", dmarc_find_foreign_report_domain("example.com", "a@badexample.com", foreign, sizeof foreign));
+    expect_text("foreign domain", foreign, "badexample.com");
+}
+
+static report_add_result add_fixture(dmarc_report_library *library, const char *file_name) {
+    char path[1024], error[REPORT_ERROR_CAPACITY] = "";
+    snprintf(path, sizeof path, "%s/%s", FIXTURE_DIR, file_name);
+    report_add_result result = dmarc_library_add_file(library, path, error, sizeof error);
+    if (result == REPORT_UNREADABLE) printf("  %s: %s\n", file_name, error);
+    return result;
+}
+
+static void test_dmarc_reports(void) {
+    dmarc_report_library library = { 0 };
+    expect_true("zip from Google", add_fixture(&library, "report_google.zip") == REPORT_ADDED);
+    expect_true("gzip from Microsoft", add_fixture(&library, "report_microsoft.xml.gz") == REPORT_ADDED);
+    expect_true("same report as plain xml", add_fixture(&library, "report_google.xml") == REPORT_ALREADY_LOADED);
+
+    expect_true("two reports", library.report_count == 2);
+    expect_true("all messages", library.total_messages == 40 + 3 + 10 + 3);
+    expect_true("passing messages", library.passing_messages == 40 + 10);
+    expect_true("rows merged per sender", library.sender_count == 2);
+    expect_text("failing sender first", library.senders[0].source_ip, "198.51.100.7");
+    expect_true("failing sender summed", library.senders[0].message_count == 6);
+    expect_text("failing sender disposition", library.senders[0].disposition, "quarantine");
+    expect_text("dkim selector", library.senders[1].dkim_selector, "google");
+
+    char error[REPORT_ERROR_CAPACITY];
+    const char not_a_report[] = "<html><body>hi</body></html>";
+    expect_true("not a report", dmarc_library_add_xml(&library, not_a_report, sizeof not_a_report - 1, error,
+                                                      sizeof error) == REPORT_UNREADABLE);
+    expect_true("missing file", add_fixture(&library, "missing.xml") == REPORT_UNREADABLE);
+    dmarc_library_clear(&library);
+    expect_true("cleared", library.report_count == 0 && library.sender_count == 0);
+}
+
+int main(void) {
+    test_domain_normalization();
+    test_names_below_domain();
+    test_dkim_keys();
+    test_dmarc_records();
+    test_dmarc_parsing();
+    test_dmarc_addresses();
+    test_dmarc_reports();
+    if (failure_count == 0) printf("all tests passed\n");
+    return failure_count == 0 ? 0 : 1;
+}
