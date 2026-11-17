@@ -1,0 +1,136 @@
+name: Release
+
+# Pushing a tag like v1.0.0 builds DNS Checker for macOS and Windows and
+# publishes a GitHub release "DNS Checker 1.0.0" with:
+#   DNSChecker-1.0.0-macOS.dmg          signed with the Developer ID and notarized by Apple
+#   DNSChecker-1.0.0-Windows-x64.zip    the program with its DLLs (not signed)
+#   SHA256SUMS.txt
+# Run by hand (workflow_dispatch), it builds the same files as workflow
+# artifacts without a release; without the signing secrets the macOS app is
+# then signed ad hoc. A tag without the secrets fails instead of shipping an
+# unsigned app.
+#
+# Secrets (Settings > Secrets and variables > Actions):
+#   MACOS_CERTIFICATE_P12        the Developer ID Application certificate with its key, base64
+#   MACOS_CERTIFICATE_PASSWORD   the password of that .p12 file
+#   APPLE_ID                     the Apple ID that notarizes
+#   APPLE_APP_PASSWORD           an app-specific password of that Apple ID
+#   APPLE_TEAM_ID                the team, VLACQJ54PL
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    env:
+      IS_RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Version
+        run: |
+          if [ "$IS_RELEASE" = "true" ]; then echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"; else echo "VERSION=0.0.0-${GITHUB_SHA::7}" >> "$GITHUB_ENV"; fi
+      - name: Build (Apple silicon and Intel)
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
+                -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 -DDNS_CHECKER_VERSION="${VERSION%%-*}"
+          cmake --build build -j 4
+          ctest --test-dir build --output-on-failure
+      - name: Import the signing certificate
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -z "$MACOS_CERTIFICATE_P12" ]; then
+            if [ "$IS_RELEASE" = "true" ]; then echo "::error::The signing secrets are missing; a release must be signed."; exit 1; fi
+            echo "SIGN_IDENTITY=-" >> "$GITHUB_ENV"
+            echo "No certificate: this test build is signed ad hoc."
+            exit 0
+          fi
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_password=$(openssl rand -base64 24)
+          echo "$MACOS_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/certificate.p12"
+          echo "SIGN_IDENTITY=Developer ID Application" >> "$GITHUB_ENV"
+      - name: Sign, notarize and pack
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ "$IS_RELEASE" = "true" ] && [ -z "$APPLE_APP_PASSWORD" ]; then echo "::error::The notarization secrets are missing."; exit 1; fi
+          packaging/macos/sign_and_package.sh "build/DNS Checker.app" "$VERSION" dist
+      - name: Remove the signing keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/*.dmg
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: git zip
+          pacboy: gcc:p cmake:p ninja:p libxml2:p zlib:p
+      - name: Version
+        run: |
+          if [ "${GITHUB_REF#refs/tags/v}" != "$GITHUB_REF" ]; then echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"; else echo "VERSION=0.0.0-${GITHUB_SHA::7}" >> "$GITHUB_ENV"; fi
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+          ctest --test-dir build --output-on-failure
+      - name: Pack
+        run: packaging/windows/package.sh build "$VERSION" dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*.zip
+          if-no-files-found: error
+
+  publish:
+    needs: [macos, windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          cd dist
+          sha256sum *.dmg *.zip > SHA256SUMS.txt
+          cat > notes.md <<NOTES
+          **macOS** (11 or later, Apple silicon and Intel): open \`DNSChecker-$version-macOS.dmg\` and drag DNS Checker to Applications. Signed with a Developer ID and notarized by Apple.
+
+          **Windows** (10 or later, 64-bit): unpack \`DNSChecker-$version-Windows-x64.zip\` and start \`DNSChecker.exe\`. Not signed with a Windows certificate, so SmartScreen may ask once: *More info*, *Run anyway*.
+
+          Checksums are in \`SHA256SUMS.txt\`.
+          NOTES
+          sed -i 's/^          //' notes.md
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "DNS Checker $version" \
+            --notes-file notes.md --generate-notes *.dmg *.zip SHA256SUMS.txt
