@@ -67,12 +67,12 @@ static bool looks_like_mail_address(const char *address) {
     return domain_has_dot && !has_space;
 }
 
-const char *dmarc_check_address_list(const char *addresses) {
+bool dmarc_address_list_is_valid(const char *addresses) {
     char address[ADDRESS_CAPACITY];
     const char *cursor = addresses;
     while (next_address(&cursor, address, sizeof address))
-        if (!looks_like_mail_address(address)) return "Mindestens eine Adresse ist keine gültige E-Mail-Adresse.";
-    return NULL;
+        if (!looks_like_mail_address(address)) return false;
+    return true;
 }
 
 /* True when `name` is `parent` or one of its subdomains. */

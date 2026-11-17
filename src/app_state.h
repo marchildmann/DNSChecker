@@ -5,6 +5,7 @@
 #include "dmarc.h"
 #include "dmarc_report.h"
 #include "lookup_task.h"
+#include "ui_text.h"
 
 #include <cui/cui.h>
 
@@ -21,7 +22,19 @@ typedef struct dmarc_form {
     int spf_alignment_index;        /* dmarc_alignment */
 } dmarc_form;
 
+/* What the last drop or file dialog loaded; worded anew each frame, so a
+ * change of language reaches it too. */
+typedef struct report_load_summary {
+    bool has_loaded;
+    int added;
+    int already_loaded;
+    int unreadable;
+    char first_unreadable_file[256];
+    report_error first_error;
+} report_load_summary;
+
 typedef struct app_state {
+    int language;                   /* ui_language, an int for the segmented control */
     int active_page;
     char domain_input[DNS_DOMAIN_CAPACITY];
     char extra_names_input[SCAN_EXTRA_NAMES_CAPACITY];   /* "lp, 7eleven, xyz._domainkey" */
@@ -32,9 +45,11 @@ typedef struct app_state {
     dmarc_form dmarc;
     bool is_dmarc_form_from_published;   /* the form holds the record the last lookup found */
     dmarc_report_library report_library;
-    char report_load_message[512];       /* what the last drop or file dialog loaded */
-    bool has_report_load_problem;
+    report_load_summary last_report_load;
 } app_state;
+
+/* The texts in the language the window shows now. */
+const ui_text *app_text(const app_state *app);
 
 /* The domain field as a host name, or "" when it is not one. */
 void app_current_domain(const app_state *app, char *out, size_t capacity);

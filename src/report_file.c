@@ -21,10 +21,6 @@ enum {
     ZIP_METHOD_DEFLATED = 8,
 };
 
-static void set_error(char *error, size_t capacity, const char *message) {
-    snprintf(error, capacity, "%s", message);
-}
-
 static bool copy_as_text(const unsigned char *bytes, size_t length, report_text *xml) {
     xml->data = malloc(length + 1);
     if (!xml->data) return false;
@@ -111,21 +107,21 @@ static bool read_first_zip_entry(const unsigned char *bytes, size_t length, zip_
     return true;
 }
 
-static bool unzip_first_file(const unsigned char *bytes, size_t length, report_text *xml, char *error, size_t error_capacity) {
+static bool unzip_first_file(const unsigned char *bytes, size_t length, report_text *xml, report_error *error) {
     zip_entry entry;
     if (!read_first_zip_entry(bytes, length, &entry)) {
-        set_error(error, error_capacity, "Das Zip-Archiv ist beschädigt.");
+        *error = REPORT_ERROR_BROKEN_ARCHIVE;
         return false;
     }
     size_t header_offset = entry.local_header_offset;
     if (header_offset + ZIP_LOCAL_HEADER_SIZE > length || read_u32(bytes + header_offset) != ZIP_LOCAL_HEADER_SIGNATURE) {
-        set_error(error, error_capacity, "Das Zip-Archiv ist beschädigt.");
+        *error = REPORT_ERROR_BROKEN_ARCHIVE;
         return false;
     }
     size_t data_offset = header_offset + ZIP_LOCAL_HEADER_SIZE + read_u16(bytes + header_offset + 26) +
                          read_u16(bytes + header_offset + 28);
     if (data_offset + entry.compressed_size > length) {
-        set_error(error, error_capacity, "Das Zip-Archiv ist unvollständig.");
+        *error = REPORT_ERROR_BROKEN_ARCHIVE;
         return false;
     }
 
@@ -133,7 +129,7 @@ static bool unzip_first_file(const unsigned char *bytes, size_t length, report_t
     bool unpacked = entry.method == ZIP_METHOD_STORED   ? copy_as_text(data, entry.compressed_size, xml)
                     : entry.method == ZIP_METHOD_DEFLATED ? inflate_to_text(data, entry.compressed_size, -MAX_WBITS, xml)
                                                           : false;
-    if (!unpacked) set_error(error, error_capacity, "Das Zip-Archiv lässt sich nicht entpacken.");
+    if (!unpacked) *error = REPORT_ERROR_BROKEN_ARCHIVE;
     return unpacked;
 }
 
@@ -149,25 +145,26 @@ static bool is_gzip(const unsigned char *bytes, size_t length) {
     return length >= 2 && bytes[0] == 0x1f && bytes[1] == 0x8b;
 }
 
-bool report_bytes_to_xml(const unsigned char *bytes, size_t length, report_text *xml, char *error, size_t error_capacity) {
+bool report_bytes_to_xml(const unsigned char *bytes, size_t length, report_text *xml, report_error *error) {
     *xml = (report_text){ 0 };
-    if (is_zip(bytes, length)) return unzip_first_file(bytes, length, xml, error, error_capacity);
+    *error = REPORT_ERROR_NONE;
+    if (is_zip(bytes, length)) return unzip_first_file(bytes, length, xml, error);
     if (is_gzip(bytes, length)) {
         bool unpacked = inflate_to_text(bytes, length, 16 + MAX_WBITS, xml);
-        if (!unpacked) set_error(error, error_capacity, "Die gz-Datei lässt sich nicht entpacken.");
+        if (!unpacked) *error = REPORT_ERROR_BROKEN_ARCHIVE;
         return unpacked;
     }
     if (!copy_as_text(bytes, length, xml)) {
-        set_error(error, error_capacity, "Zu wenig Speicher.");
+        *error = REPORT_ERROR_OUT_OF_MEMORY;
         return false;
     }
     return true;
 }
 
-static unsigned char *read_whole_file(const char *path, size_t *length, char *error, size_t error_capacity) {
+static unsigned char *read_whole_file(const char *path, size_t *length, report_error *error) {
     FILE *file = fopen(path, "rb");
     if (!file) {
-        set_error(error, error_capacity, "Die Datei lässt sich nicht öffnen.");
+        *error = REPORT_ERROR_CANNOT_OPEN;
         return NULL;
     }
     fseek(file, 0, SEEK_END);
@@ -179,19 +176,18 @@ static unsigned char *read_whole_file(const char *path, size_t *length, char *er
 
     if (!was_read) {
         free(bytes);
-        set_error(error, error_capacity, size > MAX_FILE_SIZE ? "Die Datei ist zu groß für einen Bericht."
-                                                              : "Die Datei lässt sich nicht lesen.");
+        *error = size > MAX_FILE_SIZE ? REPORT_ERROR_TOO_LARGE : REPORT_ERROR_CANNOT_READ;
         return NULL;
     }
     *length = (size_t)size;
     return bytes;
 }
 
-bool report_file_read_xml(const char *path, report_text *xml, char *error, size_t error_capacity) {
+bool report_file_read_xml(const char *path, report_text *xml, report_error *error) {
     size_t length = 0;
-    unsigned char *bytes = read_whole_file(path, &length, error, error_capacity);
+    unsigned char *bytes = read_whole_file(path, &length, error);
     if (!bytes) return false;
-    bool converted = report_bytes_to_xml(bytes, length, xml, error, error_capacity);
+    bool converted = report_bytes_to_xml(bytes, length, xml, error);
     free(bytes);
     return converted;
 }

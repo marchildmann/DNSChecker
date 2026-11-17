@@ -1,9 +1,10 @@
 /* Tests for the parts that need neither a window nor the network:
- * domain names, DMARC records and DMARC aggregate reports. */
+ * domain names, DMARC records, DMARC aggregate reports and the UI texts. */
 #include "dmarc.h"
 #include "dmarc_report.h"
 #include "dns_lookup.h"
 #include "domain_scan.h"
+#include "ui_text.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -143,10 +144,10 @@ static void test_dmarc_parsing(void) {
 
 static void test_dmarc_addresses(void) {
     char foreign[DNS_DOMAIN_CAPACITY];
-    expect_true("empty list is fine", dmarc_check_address_list("") == NULL);
-    expect_true("two addresses", dmarc_check_address_list("a@example.com, mailto:b@example.org") == NULL);
-    expect_true("missing at sign", dmarc_check_address_list("example.com") != NULL);
-    expect_true("missing domain dot", dmarc_check_address_list("a@localhost") != NULL);
+    expect_true("empty list is fine", dmarc_address_list_is_valid(""));
+    expect_true("two addresses", dmarc_address_list_is_valid("a@example.com, mailto:b@example.org"));
+    expect_true("missing at sign", !dmarc_address_list_is_valid("example.com"));
+    expect_true("missing domain dot", !dmarc_address_list_is_valid("a@localhost"));
 
     expect_true("same domain", !dmarc_find_foreign_report_domain("example.com", "a@example.com", foreign, sizeof foreign));
     expect_true("parent domain", !dmarc_find_foreign_report_domain("mail.example.com", "a@example.com", foreign, sizeof foreign));
@@ -155,11 +156,10 @@ static void test_dmarc_addresses(void) {
 }
 
 static report_add_result add_fixture(dmarc_report_library *library, const char *file_name) {
-    char path[1024], error[REPORT_ERROR_CAPACITY] = "";
+    char path[1024];
+    report_error error;
     snprintf(path, sizeof path, "%s/%s", FIXTURE_DIR, file_name);
-    report_add_result result = dmarc_library_add_file(library, path, error, sizeof error);
-    if (result == REPORT_UNREADABLE) printf("  %s: %s\n", file_name, error);
-    return result;
+    return dmarc_library_add_file(library, path, &error);
 }
 
 static void test_dmarc_reports(void) {
@@ -177,13 +177,61 @@ static void test_dmarc_reports(void) {
     expect_text("failing sender disposition", library.senders[0].disposition, "quarantine");
     expect_text("dkim selector", library.senders[1].dkim_selector, "google");
 
-    char error[REPORT_ERROR_CAPACITY];
+    report_error error;
     const char not_a_report[] = "<html><body>hi</body></html>";
-    expect_true("not a report", dmarc_library_add_xml(&library, not_a_report, sizeof not_a_report - 1, error,
-                                                      sizeof error) == REPORT_UNREADABLE);
+    expect_true("not a report", dmarc_library_add_xml(&library, not_a_report, sizeof not_a_report - 1, &error) ==
+                                    REPORT_UNREADABLE && error == REPORT_ERROR_NOT_A_REPORT);
     expect_true("missing file", add_fixture(&library, "missing.xml") == REPORT_UNREADABLE);
     dmarc_library_clear(&library);
     expect_true("cleared", library.report_count == 0 && library.sender_count == 0);
+}
+
+/* The conversions of a printf format in order, e.g. "%d (%s)" gives "ds";
+ * "%%" is a literal percent sign and does not count. */
+static void format_conversions(const char *format, char *out, size_t capacity) {
+    size_t used = 0;
+    for (const char *at = format; *at && used + 1 < capacity; at++) {
+        if (*at != '%') continue;
+        at++;
+        if (*at == '%') continue;
+        while (*at && !strchr("diouxXeEfFgGcsp", *at)) at++;   /* flags, width, precision, length */
+        if (*at) out[used++] = *at;
+    }
+    out[used] = '\0';
+}
+
+/* Both structs hold nothing but `const char *`, so they can be walked as arrays. */
+static void test_ui_texts(void) {
+    enum { STRING_COUNT = sizeof(ui_strings) / sizeof(const char *), FORMAT_COUNT = sizeof(ui_formats) / sizeof(const char *) };
+    const ui_text *german = ui_text_for(UI_LANGUAGE_GERMAN), *english = ui_text_for(UI_LANGUAGE_ENGLISH);
+    const char *const *german_strings = (const char *const *)&german->strings;
+    const char *const *english_strings = (const char *const *)&english->strings;
+    const char *const *german_formats = (const char *const *)&german->formats;
+    const char *const *english_formats = (const char *const *)&english->formats;
+    char label[64], german_conversions[16], english_conversions[16];
+
+    for (int i = 0; i < STRING_COUNT; i++) {
+        snprintf(label, sizeof label, "string %d present in both languages", i);
+        expect_true(label, german_strings[i] && english_strings[i] && german_strings[i][0] && english_strings[i][0]);
+    }
+    for (int i = 0; i < FORMAT_COUNT; i++) {
+        snprintf(label, sizeof label, "format %d present in both languages", i);
+        expect_true(label, german_formats[i] && english_formats[i]);
+        if (!german_formats[i] || !english_formats[i]) continue;
+        format_conversions(german_formats[i], german_conversions, sizeof german_conversions);
+        format_conversions(english_formats[i], english_conversions, sizeof english_conversions);
+        snprintf(label, sizeof label, "format %d takes the same arguments", i);
+        expect_text(label, english_conversions, german_conversions);
+    }
+    expect_true("every report error worded", ui_report_error_message(english, REPORT_ERROR_OUT_OF_MEMORY)[0] != '\0');
+    expect_text("plural", ui_plural(1, "one", "other"), "one");
+    expect_text("plural of zero", ui_plural(0, "one", "other"), "other");
+
+    char day[16];
+    ui_format_day(english, 1763337599, day, sizeof day);
+    expect_true("US date has slashes", strchr(day, '/') != NULL);
+    ui_format_day(german, 1763337599, day, sizeof day);
+    expect_true("German date has dots", strchr(day, '.') != NULL);
 }
 
 int main(void) {
@@ -194,6 +242,7 @@ int main(void) {
     test_dmarc_parsing();
     test_dmarc_addresses();
     test_dmarc_reports();
+    test_ui_texts();
     if (failure_count == 0) printf("all tests passed\n");
     return failure_count == 0 ? 0 : 1;
 }

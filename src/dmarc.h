@@ -58,9 +58,9 @@ bool dmarc_records_are_equivalent(const char *first, const char *second);
 /* The name the record is published under: "_dmarc.<domain>". */
 void dmarc_record_host(const char *domain, char *out, size_t capacity);
 
-/* NULL when every address in the comma separated list looks like a mail
- * address, otherwise a message naming what is wrong. An empty list is fine. */
-const char *dmarc_check_address_list(const char *addresses);
+/* True when every address in the comma separated list looks like a mail
+ * address. An empty list is fine. */
+bool dmarc_address_list_is_valid(const char *addresses);
 
 /* True when one of the addresses is outside `domain`: the receiving domain
  * then has to publish "<domain>._report._dmarc.<its domain>" to accept the

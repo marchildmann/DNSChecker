@@ -105,9 +105,9 @@ static const char *type_label(int type_code) {
 }
 
 static void note_failed_query(lookup_report *report, const char *name, int type_code) {
-    size_t used = strlen(report->problem);
-    const char *lead = used == 0 ? "Keine Antwort für: " : ", ";
-    snprintf(report->problem + used, sizeof report->problem - used, "%s%s (%s)", lead, name, type_label(type_code));
+    size_t used = strlen(report->failed_queries);
+    snprintf(report->failed_queries + used, sizeof report->failed_queries - used, "%s%s (%s)", used ? ", " : "", name,
+             type_label(type_code));
 }
 
 /* A type that fails is noted and the others still run. Returns
@@ -384,11 +384,8 @@ static bool find_zone_name_server(const char *domain, dns_server *server) {
 
 void domain_scan_run(lookup_report *report, const char *extra_names) {
     report->asks_name_server_directly = find_zone_name_server(report->domain, &report->name_server);
-    dns_status status = query_domain_itself(report);
-    bool has_problem_already = report->problem[0] != '\0';
-    if (status != DNS_STATUS_OK && !has_problem_already)
-        snprintf(report->problem, sizeof report->problem, "%s", dns_status_message(status));
-    if (status == DNS_STATUS_NO_SUCH_DOMAIN) return;
+    report->status = query_domain_itself(report);
+    if (report->status == DNS_STATUS_NO_SUCH_DOMAIN) return;
 
     summarize_domain_records(&report->records, &report->mail);
     look_up_dmarc(report, &report->mail);

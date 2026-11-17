@@ -1,17 +1,11 @@
 #include "dmarc_report.h"
 
-#include "report_file.h"
-
 #include <libxml/parser.h>
 #include <libxml/tree.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-
-static void set_error(char *error, size_t capacity, const char *message) {
-    snprintf(error, capacity, "%s", message);
-}
 
 bool dmarc_row_passes(const dmarc_report_row *row) {
     return row->dkim_passed || row->spf_passed;
@@ -109,15 +103,14 @@ static void read_metadata(xmlNode *feedback, dmarc_report *report) {
 }
 
 /* Entities and network access stay off: the files come from strangers. */
-static bool parse_report(const char *xml, size_t length, dmarc_report *report, char *error, size_t error_capacity) {
+static bool parse_report(const char *xml, size_t length, dmarc_report *report, report_error *error) {
     *report = (dmarc_report){ 0 };
     xmlDoc *document = xmlReadMemory(xml, (int)length, "report.xml", NULL, XML_PARSE_NONET | XML_PARSE_NOERROR |
                                                                           XML_PARSE_NOWARNING);
     xmlNode *feedback = document ? xmlDocGetRootElement(document) : NULL;
     bool is_feedback = feedback && strcmp((const char *)feedback->name, "feedback") == 0;
     if (!is_feedback) {
-        set_error(error, error_capacity, document ? "Kein DMARC-Bericht (kein <feedback>-Element)."
-                                                  : "Kein gültiges XML.");
+        *error = document ? REPORT_ERROR_NOT_A_REPORT : REPORT_ERROR_NOT_XML;
         xmlFreeDoc(document);
         return false;
     }
@@ -125,7 +118,7 @@ static bool parse_report(const char *xml, size_t length, dmarc_report *report, c
     read_metadata(feedback, report);
     bool has_rows = read_rows(feedback, report);
     xmlFreeDoc(document);
-    if (!has_rows) set_error(error, error_capacity, "Zu wenig Speicher.");
+    if (!has_rows) *error = REPORT_ERROR_OUT_OF_MEMORY;
     return has_rows;
 }
 
@@ -226,25 +219,25 @@ static bool append_report(dmarc_report_library *library, const dmarc_report *rep
     return rebuild_senders(library);
 }
 
-report_add_result dmarc_library_add_xml(dmarc_report_library *library, const char *xml, size_t length, char *error,
-                                        size_t error_capacity) {
+report_add_result dmarc_library_add_xml(dmarc_report_library *library, const char *xml, size_t length,
+                                        report_error *error) {
     dmarc_report report;
-    if (!parse_report(xml, length, &report, error, error_capacity)) return REPORT_UNREADABLE;
+    *error = REPORT_ERROR_NONE;
+    if (!parse_report(xml, length, &report, error)) return REPORT_UNREADABLE;
     if (is_already_loaded(library, &report)) {
         free(report.rows);
         return REPORT_ALREADY_LOADED;
     }
     if (append_report(library, &report)) return REPORT_ADDED;
 
-    set_error(error, error_capacity, "Zu wenig Speicher.");
+    *error = REPORT_ERROR_OUT_OF_MEMORY;
     return REPORT_UNREADABLE;
 }
 
-report_add_result dmarc_library_add_file(dmarc_report_library *library, const char *path, char *error,
-                                         size_t error_capacity) {
+report_add_result dmarc_library_add_file(dmarc_report_library *library, const char *path, report_error *error) {
     report_text xml;
-    if (!report_file_read_xml(path, &xml, error, error_capacity)) return REPORT_UNREADABLE;
-    report_add_result result = dmarc_library_add_xml(library, xml.data, xml.length, error, error_capacity);
+    if (!report_file_read_xml(path, &xml, error)) return REPORT_UNREADABLE;
+    report_add_result result = dmarc_library_add_xml(library, xml.data, xml.length, error);
     free(xml.data);
     return result;
 }

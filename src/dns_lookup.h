@@ -66,6 +66,4 @@ typedef struct dns_server {
  * Records that do not fit are dropped. */
 dns_status dns_query(const dns_server *server, const char *name, int type_code, dns_record_list *list);
 
-const char *dns_status_message(dns_status status);
-
 #endif

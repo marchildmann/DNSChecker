@@ -39,7 +39,8 @@ typedef struct lookup_report {
     bool asks_name_server_directly;
     dns_server name_server;
     dns_record_list records;                  /* the domain's own records first, then the other names */
-    char problem[SCAN_PROBLEM_CAPACITY];      /* empty when every query was answered */
+    dns_status status;                        /* of the domain's own records: OK, NO_DATA or NO_SUCH_DOMAIN */
+    char failed_queries[SCAN_PROBLEM_CAPACITY];   /* "example.com (CAA), www.example.com (AAAA)"; empty when all answered */
     mail_security_summary mail;
 } lookup_report;
 

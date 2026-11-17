@@ -35,7 +35,11 @@ static void collect_finished_lookup(app_state *app) {
     app->is_dmarc_form_from_published = dmarc_form_load_published(&app->dmarc, &finished->mail);
 }
 
-static void domain_bar(cui_ctx *ui, app_state *app) {
+const ui_text *app_text(const app_state *app) {
+    return ui_text_for((ui_language)app->language);
+}
+
+static void domain_bar(cui_ctx *ui, app_state *app, const ui_text *text) {
     char domain[DNS_DOMAIN_CAPACITY];
     app_current_domain(app, domain, sizeof domain);
     bool is_running = lookup_task_is_running(&app->lookup);
@@ -45,35 +49,44 @@ static void domain_bar(cui_ctx *ui, app_state *app) {
 
     cui_row(ui, .width = CUI_FILL, .gap = 12, .align = CUI_ALIGN_START) {
         domain_events = cui_input(ui, "domain", app->domain_input, sizeof app->domain_input,
-                                  .label = "Domain", .placeholder = "example.com", .icon = CUI_ICON_GLOBE,
-                                  .autofocus = true, .width = CUI_GROW(2),
-                                  .error = shows_error ? "Bitte eine gültige Domain eingeben." : NULL);
+                                  .label = text->strings.domain_label, .placeholder = "example.com",
+                                  .icon = CUI_ICON_GLOBE, .autofocus = true, .width = CUI_GROW(2),
+                                  .error = shows_error ? text->strings.domain_error : NULL);
         extra_names_events = cui_input(ui, "extra-names", app->extra_names_input, sizeof app->extra_names_input,
-                                       .label = "Weitere Namen (optional)", .placeholder = "lp, shop, xyz._domainkey",
-                                       .icon = CUI_ICON_LIST, .width = CUI_GROW(3),
-                                       .hint = "Subdomains und DKIM-Selektoren, die zusätzlich abgefragt werden.");
+                                       .label = text->strings.extra_names_label, .placeholder = "lp, shop, xyz._domainkey",
+                                       .icon = CUI_ICON_LIST, .width = CUI_GROW(3), .hint = text->strings.extra_names_hint);
         cui_column(ui, .pad_top = 24) {   /* level with the fields, below their labels */
-            wants_lookup = cui_button(ui, "Abfragen", .variant = CUI_BUTTON_PRIMARY, .icon = CUI_ICON_SEARCH,
-                                      .loading = is_running);
+            wants_lookup = cui_button(ui, text->strings.look_up_button, .variant = CUI_BUTTON_PRIMARY,
+                                      .icon = CUI_ICON_SEARCH, .loading = is_running);
         }
     }
     bool was_submitted = (domain_events | extra_names_events) & CUI_SUBMITTED;
     if ((wants_lookup || was_submitted) && !is_running) start_lookup(app);
 }
 
+static void title_bar(cui_ctx *ui, app_state *app) {
+    static const char *const languages[UI_LANGUAGE_COUNT] = { "DE", "EN" };
+    cui_row(ui, .width = CUI_FILL, .gap = 10) {
+        cui_icon(ui, CUI_ICON_SERVER, 22, CUI_COLOR_ACCENT);
+        cui_heading(ui, "DNS Checker", 3);
+        cui_spacer(ui);
+        cui_segmented(ui, "language", languages, UI_LANGUAGE_COUNT, &app->language, .size = CUI_SIZE_SM);
+    }
+}
+
 static void frame(cui_ctx *ui, void *user) {
     app_state *app = user;
-    static const char *const page_titles[PAGE_COUNT] = { "DNS-Einträge", "DMARC erstellen", "DMARC-Berichte" };
+    const ui_text *text = app_text(app);
+    const char *const page_titles[PAGE_COUNT] = {
+        text->strings.page_records, text->strings.page_dmarc, text->strings.page_reports,
+    };
     static const char *const page_icons[PAGE_COUNT] = { CUI_ICON_LIST, CUI_ICON_SHIELD, CUI_ICON_FILE_TEXT };
 
     collect_finished_lookup(app);
 
     cui_column(ui, .width = CUI_FILL, .height = CUI_FILL, .bg = CUI_COLOR_BACKGROUND, .pad = 24, .gap = 16) {
-        cui_row(ui, .gap = 10) {
-            cui_icon(ui, CUI_ICON_SERVER, 22, CUI_COLOR_ACCENT);
-            cui_heading(ui, "DNS Checker", 3);
-        }
-        domain_bar(ui, app);
+        title_bar(ui, app);
+        domain_bar(ui, app, text);
         cui_tabs(ui, "pages", page_titles, PAGE_COUNT, &app->active_page, .icons = page_icons);
         cui_scroll(ui, .id = "page", .width = CUI_FILL, .height = CUI_FILL, .gap = 16) {
             switch (app->active_page) {
@@ -92,6 +105,7 @@ static void frame(cui_ctx *ui, void *user) {
  * up, the further arguments being the extra names. */
 int main(int argc, char **argv) {
     static app_state app;
+    app.language = ui_system_language();
     dmarc_form_reset(&app.dmarc);
     lookup_task_init(&app.lookup);
     if (argc > 1) {

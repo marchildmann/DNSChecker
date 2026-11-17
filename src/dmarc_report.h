@@ -5,13 +5,14 @@
 #ifndef DMARC_REPORT_H
 #define DMARC_REPORT_H
 
+#include "report_file.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 
 enum {
     REPORT_NAME_CAPACITY = 256,
     REPORT_SHORT_CAPACITY = 64,
-    REPORT_ERROR_CAPACITY = 256,
 };
 
 /* One sender as a receiver saw it: a row of a report, or after merging,
@@ -57,9 +58,10 @@ typedef enum report_add_result {
 /* DMARC passes when either SPF or DKIM passed in alignment. */
 bool dmarc_row_passes(const dmarc_report_row *row);
 
-report_add_result dmarc_library_add_file(dmarc_report_library *library, const char *path, char *error, size_t error_capacity);
-report_add_result dmarc_library_add_xml(dmarc_report_library *library, const char *xml, size_t length, char *error,
-                                        size_t error_capacity);
+/* `error` says why when the result is REPORT_UNREADABLE. */
+report_add_result dmarc_library_add_file(dmarc_report_library *library, const char *path, report_error *error);
+report_add_result dmarc_library_add_xml(dmarc_report_library *library, const char *xml, size_t length,
+                                        report_error *error);
 void dmarc_library_clear(dmarc_report_library *library);
 
 #endif

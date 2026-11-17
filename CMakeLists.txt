@@ -22,7 +22,7 @@ find_package(LibXml2 REQUIRED)
 find_package(ZLIB REQUIRED)
 
 # Everything that does not draw: DNS queries, the worker thread, DMARC
-# records and DMARC aggregate reports.
+# records, DMARC aggregate reports and the texts in each language.
 add_library(dns_checker_core STATIC
     src/dns_lookup.c
     src/dmarc.c
@@ -30,10 +30,15 @@ add_library(dns_checker_core STATIC
     src/domain_scan.c
     src/lookup_task.c
     src/report_file.c
+    src/ui_text.c
 )
 target_include_directories(dns_checker_core PUBLIC src)
 target_link_libraries(dns_checker_core PUBLIC resolv Threads::Threads LibXml2::LibXml2 ZLIB::ZLIB)
 target_compile_options(dns_checker_core PRIVATE -Wall -Wextra)
+if(APPLE)
+    # ui_text.c reads the preferred language from System Settings
+    target_link_libraries(dns_checker_core PUBLIC "-framework CoreFoundation")
+endif()
 
 add_executable(dns_checker
     src/main.c

@@ -313,13 +313,3 @@ dns_status dns_query(const dns_server *server, const char *name, int type_code, 
     close_resolver(&resolver);
     return status;
 }
-
-const char *dns_status_message(dns_status status) {
-    switch (status) {
-    case DNS_STATUS_OK: return "OK";
-    case DNS_STATUS_NO_DATA: return "Keine Einträge dieses Typs.";
-    case DNS_STATUS_NO_SUCH_DOMAIN: return "Diese Domain existiert nicht (NXDOMAIN).";
-    case DNS_STATUS_FAILURE: return "Die Abfrage ist fehlgeschlagen (Zeitüberschreitung oder Serverfehler).";
-    }
-    return "";
-}
