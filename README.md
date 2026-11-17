@@ -44,7 +44,7 @@ The [latest release](https://github.com/marchildmann/DNSChecker/releases/latest)
 
 Needs CMake and a C compiler. On macOS everything else ships with the system (libxml2, zlib,
 libresolv). On Windows, build in an [MSYS2](https://www.msys2.org) UCRT64 shell with
-`pacman -S mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,libxml2,zlib} git zip`.
+`pacman -S mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,pkgconf,libxml2,zlib} git zip`.
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release   # CUI: -DCUI_DIR=<checkout>, else fetched from GitHub
@@ -62,7 +62,7 @@ build/DNSChecker.exe example.com                                   # Windows
 Pushing a tag such as `v1.0.0` runs [`.github/workflows/release.yml`](.github/workflows/release.yml):
 it builds both systems, signs and notarizes the macOS app with
 [`packaging/macos/sign_and_package.sh`](packaging/macos/sign_and_package.sh), packs the Windows
-program with its DLLs ([`packaging/windows/package.sh`](packaging/windows/package.sh)) and publishes
+program, statically linked into a single `DNSChecker.exe` ([`packaging/windows/package.sh`](packaging/windows/package.sh)) and publishes
 the release with checksums. The signing secrets it needs are listed at the top of the workflow;
 without them a tag fails rather than publish an unsigned app.
 

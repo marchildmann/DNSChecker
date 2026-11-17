@@ -3,7 +3,7 @@ name: Release
 # Pushing a tag like v1.0.0 builds DNS Checker for macOS and Windows and
 # publishes a GitHub release "DNS Checker 1.0.0" with:
 #   DNSChecker-1.0.0-macOS.dmg          signed with the Developer ID and notarized by Apple
-#   DNSChecker-1.0.0-Windows-x64.zip    the program with its DLLs (not signed)
+#   DNSChecker-1.0.0-Windows-x64.zip    a single DNSChecker.exe (not signed)
 #   SHA256SUMS.txt
 # Run by hand (workflow_dispatch), it builds the same files as workflow
 # artifacts without a release; without the signing secrets the macOS app is
@@ -91,7 +91,7 @@ jobs:
           msystem: UCRT64
           update: true
           install: git zip
-          pacboy: gcc:p cmake:p ninja:p libxml2:p zlib:p
+          pacboy: gcc:p cmake:p ninja:p pkgconf:p libxml2:p zlib:p
       - name: Version
         run: |
           if [ "${GITHUB_REF#refs/tags/v}" != "$GITHUB_REF" ]; then echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"; else echo "VERSION=0.0.0-${GITHUB_SHA::7}" >> "$GITHUB_ENV"; fi

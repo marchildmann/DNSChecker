@@ -34,7 +34,7 @@ jobs:
           msystem: UCRT64
           update: true
           install: git zip
-          pacboy: gcc:p cmake:p ninja:p libxml2:p zlib:p
+          pacboy: gcc:p cmake:p ninja:p pkgconf:p libxml2:p zlib:p
       - name: Build
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release

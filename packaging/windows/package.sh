@@ -1,5 +1,6 @@
 #!/bin/sh
-# Packs DNSChecker.exe with the DLLs it needs from MSYS2 into a zip archive.
+# Packs DNSChecker.exe into a zip archive. The program is linked statically,
+# so it needs no DLLs beside it; this script fails if one slipped back in.
 # Runs in an MSYS2 UCRT64 shell after the build:
 #
 #   packaging/windows/package.sh <build directory> <version> <output directory>
@@ -13,15 +14,19 @@ stage="$output_dir/$name"
 
 rm -rf "$stage"
 mkdir -p "$stage"
+msys2_dlls=$(ldd "$build_dir/DNSChecker.exe" | awk '/\/ucrt64\// { print $1 }')
+if [ -n "$msys2_dlls" ]; then
+    echo "DNSChecker.exe still loads DLLs from MSYS2, so it would not start elsewhere:" >&2
+    echo "$msys2_dlls" >&2
+    exit 1
+fi
 cp "$build_dir/DNSChecker.exe" "$stage/"
-# every DLL the program loads from MSYS2 (libxml2, zlib, winpthreads, ...); Windows' own stay out
-ldd "$build_dir/DNSChecker.exe" | awk '/\/ucrt64\// { print $3 }' | sort -u | while read -r dll; do cp "$dll" "$stage/"; done
 cp LICENSE "$stage/LICENSE.txt"
 cat > "$stage/README.txt" <<TEXT
 DNS Checker $version for Windows (64-bit)
 
-Start DNSChecker.exe; the DLL files beside it belong to it and must stay in
-the same folder. Nothing is installed.
+Start DNSChecker.exe. It is a single file: copy it wherever you like.
+Nothing is installed.
 
 The program is not signed with a Windows certificate, so SmartScreen may
 ask before the first start: "More info", then "Run anyway".

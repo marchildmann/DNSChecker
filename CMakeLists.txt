@@ -18,8 +18,26 @@ else()
 endif()
 
 find_package(Threads REQUIRED)
-find_package(LibXml2 REQUIRED)
-find_package(ZLIB REQUIRED)
+
+# libxml2 reads the DMARC reports, zlib unpacks the compressed ones.
+add_library(xml_and_zlib INTERFACE)
+if(WIN32)
+    # Windows gets a single DNSChecker.exe with no DLLs beside it: libxml2,
+    # zlib, iconv, winpthreads and the GCC runtime come from MSYS2's static
+    # libraries. pkg-config --static knows what static libxml2 needs besides
+    # itself; LIBXML_STATIC keeps its headers from expecting the DLL.
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(LIBXML2 REQUIRED libxml-2.0 zlib)
+    target_include_directories(xml_and_zlib INTERFACE ${LIBXML2_STATIC_INCLUDE_DIRS})
+    target_compile_definitions(xml_and_zlib INTERFACE LIBXML_STATIC)
+    target_link_directories(xml_and_zlib INTERFACE ${LIBXML2_STATIC_LIBRARY_DIRS})
+    target_link_libraries(xml_and_zlib INTERFACE ${LIBXML2_STATIC_LIBRARIES})
+    target_link_options(xml_and_zlib INTERFACE -static)
+else()
+    find_package(LibXml2 REQUIRED)
+    find_package(ZLIB REQUIRED)
+    target_link_libraries(xml_and_zlib INTERFACE LibXml2::LibXml2 ZLIB::ZLIB)
+endif()
 
 # Everything that does not draw: DNS queries, the worker thread, DMARC
 # records, DMARC aggregate reports and the texts in each language.
@@ -35,7 +53,7 @@ add_library(dns_checker_core STATIC
     src/ui_text.c
 )
 target_include_directories(dns_checker_core PUBLIC src)
-target_link_libraries(dns_checker_core PUBLIC Threads::Threads LibXml2::LibXml2 ZLIB::ZLIB)
+target_link_libraries(dns_checker_core PUBLIC Threads::Threads xml_and_zlib)
 target_compile_options(dns_checker_core PRIVATE -Wall -Wextra)
 if(WIN32)
     target_sources(dns_checker_core PRIVATE src/dns_query_windows.c)
