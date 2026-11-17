@@ -1,0 +1,30 @@
+// The program's icon and version, shown by Explorer, the taskbar and the
+// window. CUI loads icon resource 1 for its window class.
+#include <winver.h>
+
+1 ICON "@DNS_CHECKER_ICON_ICO@"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION @DNS_CHECKER_VERSION_COMMAS@
+PRODUCTVERSION @DNS_CHECKER_VERSION_COMMAS@
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName", "Marc Hildmann"
+            VALUE "FileDescription", "DNS Checker"
+            VALUE "FileVersion", "@DNS_CHECKER_VERSION@"
+            VALUE "LegalCopyright", "(c) 2026 Marc Hildmann, MIT License"
+            VALUE "OriginalFilename", "DNSChecker.exe"
+            VALUE "ProductName", "DNS Checker"
+            VALUE "ProductVersion", "@DNS_CHECKER_VERSION@"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

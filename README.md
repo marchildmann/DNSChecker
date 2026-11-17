@@ -1,3 +1,5 @@
+<img src="assets/icon/dnschecker-flat-preview.png" alt="" width="96" align="right">
+
 # DNS Checker
 
 A small desktop app in C, built with [CUI](https://github.com/yappologistic/CUI), that looks up a
@@ -82,6 +84,7 @@ without them a tag fails rather than publish an unsigned app.
 | `tests/test_core.c`, `tests/fixtures/` | tests for domain names, DMARC records, reports and the texts of both languages (no network) |
 | `tests/test_network.c` | a real lookup of github.com, run by CI on each system |
 | `packaging/`, `.github/workflows/` | app bundle, signing, Windows package; CI and releases |
+| `assets/icon/` | the app icon: `.icns`, `.ico` and its SVG sources |
 
 ## License
 

@@ -64,14 +64,25 @@ cui_app_target(dns_checker)
 # workflow passes the version of its tag in DNS_CHECKER_VERSION.
 set(DNS_CHECKER_VERSION "${PROJECT_VERSION}" CACHE STRING "Version shown in the app bundle")
 if(APPLE)
+    set(DNS_CHECKER_ICON_ICNS "${CMAKE_CURRENT_SOURCE_DIR}/assets/icon/DNSChecker.icns")
+    target_sources(dns_checker PRIVATE "${DNS_CHECKER_ICON_ICNS}")
+    set_source_files_properties("${DNS_CHECKER_ICON_ICNS}" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
     set_target_properties(dns_checker PROPERTIES
         MACOSX_BUNDLE ON
+        MACOSX_BUNDLE_ICON_FILE DNSChecker.icns
         OUTPUT_NAME "DNS Checker"
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/packaging/macos/Info.plist.in"
         MACOSX_BUNDLE_GUI_IDENTIFIER "com.marchildmann.dnschecker"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "${DNS_CHECKER_VERSION}"
         MACOSX_BUNDLE_BUNDLE_VERSION "${DNS_CHECKER_VERSION}")
 elseif(WIN32)
+    enable_language(RC)
+    # "1.2.3" or "1.2.3-dev" becomes "1,2,3,0" for the version resource
+    string(REGEX MATCH "^[0-9]+\\.[0-9]+\\.[0-9]+" DNS_CHECKER_VERSION_NUMBERS "${DNS_CHECKER_VERSION}")
+    string(REPLACE "." "," DNS_CHECKER_VERSION_COMMAS "${DNS_CHECKER_VERSION_NUMBERS},0")
+    set(DNS_CHECKER_ICON_ICO "${CMAKE_CURRENT_SOURCE_DIR}/assets/icon/DNSChecker.ico")
+    configure_file(packaging/windows/dns_checker.rc.in "${CMAKE_CURRENT_BINARY_DIR}/dns_checker.rc" @ONLY)
+    target_sources(dns_checker PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/dns_checker.rc")
     set_target_properties(dns_checker PROPERTIES OUTPUT_NAME "DNSChecker")
 endif()
 
