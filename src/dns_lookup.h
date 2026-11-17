@@ -1,6 +1,8 @@
-/* DNS queries through the system resolver (libresolv), with each answer
- * turned into a printable record. No UI code here; the lookup blocks, so
- * call it from a worker thread (see lookup_task.h). */
+/* DNS queries, with each answer turned into a printable record. The query
+ * itself is per platform: dns_query_resolv.c (libresolv, macOS and Linux)
+ * and dns_query_windows.c (the Windows DNS API); this file's names,
+ * normalization and record texts are shared. No UI code here; a query
+ * blocks, so call it from a worker thread (see lookup_task.h). */
 #ifndef DNS_LOOKUP_H
 #define DNS_LOOKUP_H
 
@@ -32,10 +34,25 @@ typedef struct dns_record_list {
     int count;
 } dns_record_list;
 
+/* The record type numbers (RFC 1035, 3596, 8659); spelled out here so the
+ * code does not depend on one platform's resolver headers. Not DNS_TYPE_*:
+ * Windows' windns.h defines those as macros. */
+enum {
+    RECORD_TYPE_A = 1,
+    RECORD_TYPE_NS = 2,
+    RECORD_TYPE_CNAME = 5,
+    RECORD_TYPE_SOA = 6,
+    RECORD_TYPE_PTR = 12,
+    RECORD_TYPE_MX = 15,
+    RECORD_TYPE_TXT = 16,
+    RECORD_TYPE_AAAA = 28,
+    RECORD_TYPE_CAA = 257,
+};
+
 /* The record types the app offers, in the order shown. */
 typedef struct dns_record_type {
     const char *label;
-    int code;                    /* the ns_t_* value */
+    int code;                    /* RECORD_TYPE_* */
 } dns_record_type;
 
 extern const dns_record_type dns_record_types[];

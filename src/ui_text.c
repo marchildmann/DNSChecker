@@ -1,12 +1,16 @@
 #include "ui_text.h"
 
+#include "portable.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
-#ifdef __APPLE__
+#if defined(__APPLE__)
 #include <CoreFoundation/CoreFoundation.h>
+#elif defined(_WIN32)
+#include <windows.h>
 #endif
 
 static const ui_text german = {
@@ -269,11 +273,18 @@ const ui_text *ui_text_for(ui_language language) {
     return language == UI_LANGUAGE_GERMAN ? &german : &english;
 }
 
+#if defined(_WIN32)
+/* The language of the Windows display, which the user picks in Settings. */
+static bool system_prefers_german(void) {
+    return PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_GERMAN;
+}
+#else
 static bool is_german_language_code(const char *code) {
     return code && strncmp(code, "de", 2) == 0;
 }
+#endif
 
-#ifdef __APPLE__
+#if defined(__APPLE__)
 /* The first language in System Settings, e.g. "de-DE"; apps started from
  * the Finder have no LANG variable to go by. */
 static bool system_prefers_german(void) {
@@ -288,7 +299,7 @@ static bool system_prefers_german(void) {
     if (languages) CFRelease(languages);
     return prefers_german;
 }
-#else
+#elif !defined(_WIN32)
 static bool system_prefers_german(void) {
     const char *language = getenv("LC_ALL");
     if (!language || !*language) language = getenv("LC_MESSAGES");
@@ -332,6 +343,6 @@ const char *ui_plural(long count, const char *one, const char *other) {
 void ui_format_day(const ui_text *text, long long seconds, char *out, size_t capacity) {
     time_t moment = (time_t)seconds;
     struct tm calendar;
-    localtime_r(&moment, &calendar);
+    portable_local_time(moment, &calendar);
     strftime(out, capacity, text->strings.date_format, &calendar);
 }

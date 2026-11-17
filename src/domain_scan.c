@@ -1,6 +1,7 @@
 #include "domain_scan.h"
 
-#include <arpa/nameser.h>
+#include "portable.h"
+
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,9 +22,9 @@ static const char *const common_host_names[] = { "www" };
 
 /* What is asked below the domain: hosts get the address and mail types,
  * service names (_dmarc, s1._domainkey) only carry TXT. */
-static const int host_alias_types[] = { ns_t_cname };
-static const int host_record_types[] = { ns_t_a, ns_t_aaaa, ns_t_mx, ns_t_txt };
-static const int service_record_types[] = { ns_t_txt };
+static const int host_alias_types[] = { RECORD_TYPE_CNAME };
+static const int host_record_types[] = { RECORD_TYPE_A, RECORD_TYPE_AAAA, RECORD_TYPE_MX, RECORD_TYPE_TXT };
+static const int service_record_types[] = { RECORD_TYPE_TXT };
 
 enum { MAX_SCAN_TARGETS = 64, SELECTOR_CAPACITY = 128 };
 
@@ -149,7 +150,7 @@ static void query_service_name(lookup_report *report, const char *name) {
     int records_before = report->records.count;
     query_types(report, name, service_record_types, 1);
     bool stops_at_alias = report->asks_name_server_directly && answer_has_alias(&report->records, records_before);
-    if (stops_at_alias) dns_query(NULL, name, ns_t_txt, &report->records);
+    if (stops_at_alias) dns_query(NULL, name, RECORD_TYPE_TXT, &report->records);
 }
 
 /* A name with a CNAME has no other records of its own: asking further would
@@ -241,7 +242,7 @@ static void look_up_dmarc(const lookup_report *report, mail_security_summary *ma
     if (!answer) return;
 
     snprintf(dmarc_host, sizeof dmarc_host, "_dmarc.%s", report->domain);
-    dns_query(server_of(report), dmarc_host, ns_t_txt, answer);
+    dns_query(server_of(report), dmarc_host, RECORD_TYPE_TXT, answer);
     const dns_record *dmarc = find_text_record(answer, "v=DMARC1");
     mail->has_dmarc = dmarc != NULL;
     if (dmarc) snprintf(mail->dmarc_record, sizeof mail->dmarc_record, "%s", dmarc->value);
@@ -280,7 +281,7 @@ static bool has_names_below_domainkey(lookup_report *report) {
     char domainkey_name[DNS_DOMAIN_CAPACITY + 16];
     snprintf(domainkey_name, sizeof domainkey_name, "_domainkey.%s", report->domain);
     int records_before = report->records.count;
-    dns_status status = dns_query(server_of(report), domainkey_name, ns_t_txt, &report->records);
+    dns_status status = dns_query(server_of(report), domainkey_name, RECORD_TYPE_TXT, &report->records);
     report->records.count = records_before;   /* only whether it exists matters */
     return status == DNS_STATUS_OK || status == DNS_STATUS_NO_DATA;
 }
@@ -290,7 +291,7 @@ static bool try_dkim_selector(lookup_report *report, const char *selector) {
     char key_name[DNS_DOMAIN_CAPACITY + 64];
     snprintf(key_name, sizeof key_name, "%s._domainkey.%s", selector, report->domain);
     int records_before = report->records.count;
-    dns_query(server_of(report), key_name, ns_t_txt, &report->records);
+    dns_query(server_of(report), key_name, RECORD_TYPE_TXT, &report->records);
     if (answer_holds_dkim_key(&report->records, records_before)) {
         note_dkim_selector(&report->mail, key_name);
         return true;
@@ -304,7 +305,7 @@ static void search_dated_selectors(lookup_report *report) {
     char selector[16];
     time_t now = time(NULL);
     struct tm today;
-    localtime_r(&now, &today);
+    portable_local_time(now, &today);
 
     for (int year = today.tm_year + 1900; year >= DATED_SELECTOR_FIRST_YEAR; year--) {
         int last_month = year == today.tm_year + 1900 ? today.tm_mon + 1 : 12;
@@ -329,7 +330,7 @@ static void search_unlisted_dkim_selectors(lookup_report *report) {
 static bool resolve_ipv4(const char *host_name, char *address, size_t capacity) {
     dns_record_list *answer = calloc(1, sizeof *answer);
     if (!answer) return false;
-    dns_query(NULL, host_name, ns_t_a, answer);
+    dns_query(NULL, host_name, RECORD_TYPE_A, answer);
     bool was_found = false;
     for (int i = 0; i < answer->count && !was_found; i++) {
         if (strcmp(answer->records[i].type, "A") != 0) continue;
@@ -345,7 +346,7 @@ static bool resolve_ipv4(const char *host_name, char *address, size_t capacity) 
 static bool server_answers_for(const dns_server *server, const char *domain) {
     dns_record_list *answer = calloc(1, sizeof *answer);
     if (!answer) return false;
-    dns_status status = dns_query(server, domain, ns_t_soa, answer);
+    dns_status status = dns_query(server, domain, RECORD_TYPE_SOA, answer);
     free(answer);
     return status != DNS_STATUS_FAILURE;
 }
@@ -369,7 +370,7 @@ static bool find_zone_name_server(const char *domain, dns_server *server) {
     bool was_found = false;
     for (const char *zone = domain; zone && strchr(zone, '.') && !was_found; zone = strchr(zone, '.') + 1) {
         name_servers->count = 0;
-        dns_query(NULL, zone, ns_t_ns, name_servers);
+        dns_query(NULL, zone, RECORD_TYPE_NS, name_servers);
         was_found = pick_answering_server(name_servers, domain, server);
         if (name_servers->count > 0) break;   /* the zone is found, whether a server answered or not */
     }
