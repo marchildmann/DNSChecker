@@ -1,6 +1,7 @@
 /* The DMARC reports page: aggregate reports dropped on the window or picked
  * in a file dialog, summed up per sender, failing senders first. */
 #include "app_state.h"
+#include "portable.h"
 
 #include <cui/cui_app.h>
 #include <stdio.h>
@@ -12,11 +13,6 @@ static const char REPORT_EXTENSIONS[] = "zip;gz;xml";
 /* Loading                                                                  */
 /* ------------------------------------------------------------------------ */
 
-static const char *file_name_of(const char *path) {
-    const char *slash = strrchr(path, '/');
-    return slash ? slash + 1 : path;
-}
-
 static void load_one_file(dmarc_report_library *library, const char *path, report_load_summary *load) {
     report_error error;
     switch (dmarc_library_add_file(library, path, &error)) {
@@ -24,7 +20,7 @@ static void load_one_file(dmarc_report_library *library, const char *path, repor
     case REPORT_ALREADY_LOADED: load->already_loaded++; break;
     case REPORT_UNREADABLE:
         if (load->unreadable++ == 0) {
-            snprintf(load->first_unreadable_file, sizeof load->first_unreadable_file, "%s", file_name_of(path));
+            snprintf(load->first_unreadable_file, sizeof load->first_unreadable_file, "%s", portable_file_name(path));
             load->first_error = error;
         }
         break;

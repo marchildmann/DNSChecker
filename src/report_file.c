@@ -1,5 +1,7 @@
 #include "report_file.h"
 
+#include "portable.h"
+
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -162,7 +164,7 @@ bool report_bytes_to_xml(const unsigned char *bytes, size_t length, report_text 
 }
 
 static unsigned char *read_whole_file(const char *path, size_t *length, report_error *error) {
-    FILE *file = fopen(path, "rb");
+    FILE *file = portable_open_file(path, "rb");
     if (!file) {
         *error = REPORT_ERROR_CANNOT_OPEN;
         return NULL;
