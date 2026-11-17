@@ -45,3 +45,7 @@ ctest --test-dir build --output-on-failure
 | `src/main.c` | window, domain field, page switch |
 | `src/page_records.c`, `src/page_dmarc.c`, `src/page_reports.c` | the three pages |
 | `tests/test_core.c`, `tests/fixtures/` | tests for domain names, DMARC records and reports (no network) |
+
+## License
+
+MIT, see [LICENSE](LICENSE). CUI is MIT licensed as well.
