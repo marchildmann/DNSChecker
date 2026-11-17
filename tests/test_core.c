@@ -3,6 +3,7 @@
 #include "dmarc.h"
 #include "dmarc_report.h"
 #include "dns_lookup.h"
+#include "dns_wire.h"
 #include "domain_scan.h"
 #include "ui_text.h"
 
@@ -85,6 +86,61 @@ static void test_dkim_keys(void) {
     expect_true("revoked key with space", !dkim_record_has_key("v=DKIM1; p= ;"));
     expect_true("no p tag", !dkim_record_has_key("v=spf1 -all"));
     expect_true("p inside another tag", !dkim_record_has_key("v=DKIM1; s=email:p=x"));
+}
+
+static size_t read_fixture(const char *file_name, unsigned char *out, size_t capacity) {
+    char path[1024];
+    snprintf(path, sizeof path, "%s/%s", FIXTURE_DIR, file_name);
+    FILE *file = fopen(path, "rb");
+    if (!file) return 0;
+    size_t length = fread(out, 1, capacity, file);
+    fclose(file);
+    return length;
+}
+
+static bool list_has(const dns_record_list *list, const char *type, const char *name, const char *value) {
+    for (int i = 0; i < list->count; i++) {
+        const dns_record *record = &list->records[i];
+        if (!strcmp(record->type, type) && !strcmp(record->name, name) && !strcmp(record->value, value)) return true;
+    }
+    return false;
+}
+
+static void test_wire_query(void) {
+    static const unsigned char expected[] = {
+        0x12, 0x34, 0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0,
+        3, 'w', 'w', 'w', 7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'c', 'o', 'm', 0,
+        0x01, 0x01, 0, 1,
+    };
+    unsigned char query[DNS_WIRE_MESSAGE_CAPACITY];
+    size_t length = dns_wire_build_query(0x1234, "www.example.com", RECORD_TYPE_CAA, query, sizeof query);
+    expect_true("query length", length == sizeof expected);
+    expect_true("query bytes", length == sizeof expected && memcmp(query, expected, length) == 0);
+    expect_true("empty label refused", dns_wire_build_query(1, "a..b", RECORD_TYPE_CAA, query, sizeof query) == 0);
+}
+
+/* A real response of github.com's name server to a CAA query (id 0x1234),
+ * with its names compressed. */
+static void test_wire_response(void) {
+    static dns_record_list list;
+    unsigned char message[DNS_WIRE_MESSAGE_CAPACITY];
+    size_t length = read_fixture("caa_github_com.bin", message, sizeof message);
+    expect_true("fixture read", length > 12);
+
+    list.count = 0;
+    expect_true("response read", dns_wire_read_response(message, length, 0x1234, &list) == DNS_STATUS_OK);
+    expect_true("seven CAA records", list.count == 7);
+    expect_true("issue letsencrypt", list_has(&list, "CAA", "github.com", "0 issue \"letsencrypt.org\""));
+    expect_true("issuewild digicert", list_has(&list, "CAA", "github.com", "0 issuewild \"digicert.com\""));
+
+    list.count = 0;
+    expect_true("another query's id", dns_wire_read_response(message, length, 0x4321, &list) == DNS_STATUS_FAILURE);
+    expect_true("cut short", dns_wire_read_response(message, length - 5, 0x1234, &list) == DNS_STATUS_FAILURE);
+
+    unsigned char looping[] = { 0x12, 0x34, 0x81, 0x80, 0, 0, 0, 1, 0, 0, 0, 0, 0xc0, 12 };
+    expect_true("pointer loop", dns_wire_read_response(looping, sizeof looping, 0x1234, &list) == DNS_STATUS_FAILURE);
+    unsigned char missing[] = { 0x12, 0x34, 0x81, 0x83, 0, 0, 0, 0, 0, 0, 0, 0 };
+    expect_true("NXDOMAIN", dns_wire_read_response(missing, sizeof missing, 0x1234, &list) == DNS_STATUS_NO_SUCH_DOMAIN);
 }
 
 static void expect_record(const char *what, dmarc_settings settings, const char *expected) {
@@ -238,6 +294,8 @@ int main(void) {
     test_domain_normalization();
     test_names_below_domain();
     test_dkim_keys();
+    test_wire_query();
+    test_wire_response();
     test_dmarc_records();
     test_dmarc_parsing();
     test_dmarc_addresses();

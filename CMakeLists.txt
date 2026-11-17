@@ -25,6 +25,7 @@ find_package(ZLIB REQUIRED)
 # records, DMARC aggregate reports and the texts in each language.
 add_library(dns_checker_core STATIC
     src/dns_lookup.c
+    src/dns_wire.c
     src/dmarc.c
     src/dmarc_report.c
     src/domain_scan.c

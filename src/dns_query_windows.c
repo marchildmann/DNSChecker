@@ -1,14 +1,20 @@
 /* dns_query for Windows: the system's DNS API (DnsQuery_UTF8), which hands
  * back each record already taken apart. The cache is bypassed so a query
- * shows what the server holds now, as on the other systems. */
+ * shows what the server holds now, as on the other systems.
+ *
+ * CAA is the exception: the API answers such a query with success and no
+ * records, as it drops every type it does not know. CAA queries therefore
+ * go out as UDP packets the app builds and reads itself (dns_wire.c). */
 #include "dns_lookup.h"
 
 #include "dns_lookup_internal.h"
+#include "dns_wire.h"
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windns.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -36,19 +42,6 @@ static void format_start_of_authority(const DNS_SOA_DATAA *soa, char *out, size_
     dns_format_start_of_authority(soa->pNamePrimaryServer, soa->pNameAdministrator, timers, out, capacity);
 }
 
-/* Windows has no structure for CAA and hands over the raw data. Depending on
- * the version it is prefixed with its byte count (DNS_UNKNOWN_DATA) or not;
- * the record's data length tells which. */
-static void format_certification_authority(const DNS_RECORDA *record, char *out, size_t capacity) {
-    const DNS_UNKNOWN_DATA *unknown = &record->Data.Unknown;
-    size_t prefixed_length = offsetof(DNS_UNKNOWN_DATA, bData) + unknown->dwByteCount;
-    bool has_count_prefix = record->wDataLength >= offsetof(DNS_UNKNOWN_DATA, bData) &&
-                            prefixed_length == record->wDataLength;
-    const unsigned char *data = has_count_prefix ? unknown->bData : (const unsigned char *)&record->Data;
-    size_t length = has_count_prefix ? unknown->dwByteCount : record->wDataLength;
-    if (!dns_format_certification_authority(data, length, out, capacity)) dns_format_undecoded(length, out, capacity);
-}
-
 static void format_record_data(const DNS_RECORDA *record, char *out, size_t capacity) {
     switch (record->wType) {
     case RECORD_TYPE_A: format_address(AF_INET, &record->Data.A.IpAddress, out, capacity); break;
@@ -61,7 +54,6 @@ static void format_record_data(const DNS_RECORDA *record, char *out, size_t capa
         break;
     case RECORD_TYPE_TXT: format_text(&record->Data.TXT, out, capacity); break;
     case RECORD_TYPE_SOA: format_start_of_authority(&record->Data.SOA, out, capacity); break;
-    case RECORD_TYPE_CAA: format_certification_authority(record, out, capacity); break;
     default: dns_format_undecoded(record->wDataLength, out, capacity); break;
     }
 }
@@ -93,7 +85,70 @@ static dns_status add_answers(const DNS_RECORDA *first, dns_record_list *list) {
     return answer_count > 0 ? DNS_STATUS_OK : DNS_STATUS_NO_DATA;
 }
 
+/* ------------------------------------------------------------------------ */
+/* CAA over UDP                                                             */
+/* ------------------------------------------------------------------------ */
+
+enum { UDP_ATTEMPTS = 3, UDP_TIMEOUT_MILLISECONDS = 3000, DNS_PORT = 53 };
+
+/* The first DNS server Windows uses, for queries that name none. */
+static bool find_system_name_server(struct in_addr *address) {
+    unsigned char buffer[1024];
+    DWORD size = sizeof buffer;
+    if (DnsQueryConfig(DnsConfigDnsServerList, 0, NULL, NULL, buffer, &size) != ERROR_SUCCESS) return false;
+    const IP4_ARRAY *servers = (const IP4_ARRAY *)buffer;
+    if (servers->AddrCount == 0) return false;
+    address->s_addr = servers->AddrArray[0];
+    return true;
+}
+
+static bool find_target_server(const dns_server *server, struct sockaddr_in *target) {
+    *target = (struct sockaddr_in){ .sin_family = AF_INET, .sin_port = htons(DNS_PORT) };
+    if (server) return inet_pton(AF_INET, server->address, &target->sin_addr) == 1;
+    return find_system_name_server(&target->sin_addr);
+}
+
+/* Sends the query and waits for the answer, a few times over, since UDP
+ * may lose either. Returns the answer's length, or 0. */
+static int exchange_over_udp(const struct sockaddr_in *target, const unsigned char *query, int query_length,
+                             unsigned char *answer, int capacity) {
+    SOCKET udp = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (udp == INVALID_SOCKET) return 0;
+    DWORD timeout = UDP_TIMEOUT_MILLISECONDS;
+    setsockopt(udp, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout, sizeof timeout);
+
+    int answer_length = 0;
+    for (int attempt = 0; attempt < UDP_ATTEMPTS && answer_length <= 0; attempt++) {
+        if (sendto(udp, (const char *)query, query_length, 0, (const struct sockaddr *)target, sizeof *target) < 0)
+            break;
+        answer_length = recv(udp, (char *)answer, capacity, 0);
+    }
+    closesocket(udp);
+    return answer_length > 0 ? answer_length : 0;
+}
+
+static dns_status query_over_udp(const dns_server *server, const char *name, int type_code, dns_record_list *list) {
+    unsigned char query[DNS_WIRE_MESSAGE_CAPACITY], answer[DNS_WIRE_MESSAGE_CAPACITY];
+    struct sockaddr_in target;
+    uint16_t id = (uint16_t)(GetTickCount() ^ GetCurrentThreadId());
+    size_t query_length = dns_wire_build_query(id, name, type_code, query, sizeof query);
+    if (query_length == 0 || !find_target_server(server, &target)) return DNS_STATUS_FAILURE;
+
+    WSADATA winsock;
+    if (WSAStartup(MAKEWORD(2, 2), &winsock) != 0) return DNS_STATUS_FAILURE;
+    int answer_length = exchange_over_udp(&target, query, (int)query_length, answer, sizeof answer);
+    WSACleanup();
+    if (answer_length == 0) return DNS_STATUS_FAILURE;
+    return dns_wire_read_response(answer, (size_t)answer_length, id, list);
+}
+
+/* ------------------------------------------------------------------------ */
+/* Entry point                                                              */
+/* ------------------------------------------------------------------------ */
+
 dns_status dns_query(const dns_server *server, const char *name, int type_code, dns_record_list *list) {
+    if (type_code == RECORD_TYPE_CAA) return query_over_udp(server, name, type_code, list);
+
     IP4_ARRAY servers = { .AddrCount = 1 };
     if (server && inet_pton(AF_INET, server->address, &servers.AddrArray[0]) != 1) return DNS_STATUS_FAILURE;
 
